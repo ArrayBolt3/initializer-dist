@@ -95,6 +95,15 @@ safe-rm -r /var/cache/tb-binary/.cache/tb/gpgtmpdir || true
 ## Leftover from build process using mmdebstrap.
 safe-rm --force /etc/apt/apt.conf.d/99mmdebstrap
 
+## Leaks into the built image from the host system, unnecessary and can cause
+## confusion. See:
+## https://forums.kicksecure.com/t/dns-nameserver-10-139-1-1/858/15
+## During VM builds this file is bind-mounted so we have to unmount it first.
+if mountpoint /etc/resolv.conf; then
+  umount /etc/resolv.conf
+fi
+safe-rm --force /etc/resolv.conf
+
 ## Truncate all log files, keeping user groups and permissions.
 find /var/log -type f -exec cp /dev/null {} \;
 
