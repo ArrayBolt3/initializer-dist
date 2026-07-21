@@ -1,3 +1,78 @@
+commit 7fd51fe02b86553ac22d2515ef958c5d613cf11d
+Merge: a5207f2 d7e8d7f
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Tue Jul 21 06:11:13 2026 -0400
+
+    Merge remote-tracking branch 'refs/remotes/org-ai-assisted/master'
+
+commit d7e8d7fe72e7c6adcc0dfa0b268863efc0081baf
+Author: assisted-by-ai (Bot Account) (Machine Account) <228987186+assisted-by-ai@users.noreply.github.com>
+Date:   Fri Jul 17 04:16:32 2026 -0400
+
+    80_cleanup: strip nvme ids, dkms build logs, and leaked /run/blkid cache (reproducibility) (#1)
+
+    * 80_cleanup: strip nvme ids, dkms build logs, and the leaked /run/blkid cache
+
+    A --freshness frozen build-twice of kicksecure-lxqt showed the two rootfs differ
+    in a handful of files; three classes are per-build non-deterministic state that a
+    shipped image should not carry, and that this cleanup script is the right home for
+    (next to the existing random-seed / dpkg-available / insserv handling):
+
+      - /etc/nvme/hostid + /etc/nvme/hostnqn -- nvme-cli generates these randomly at
+        install time; re-created as needed on first boot.
+      - /var/lib/dkms/<mod>/<ver>/<kver>/<arch>/log/make.log -- dkms build log with
+        timestamps (e.g. tirdad); the built modules stay, only the log goes.
+      - /run/blkid/blkid.tab(+.old) -- runtime blkid disk-uuid cache; /run is tmpfs
+        and must be empty in a shipped image, but a build-time blkid run leaked it in.
+
+    Also brings the script's preamble to the canonical strict-mode block (R-010) and
+    fixes the array-expansion of BASH_SOURCE (SC2128); SKIP_SCRIPTS is defaulted so
+    nounset does not abort when no scripts are being skipped.
+
+    This runs unconditionally: reproducible/verifiable output is the default (the
+    companion derivative-maker change removes the dead --verifiable opt-in flag).
+
+    Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+    * 80_cleanup: also strip debconf answers DB and the VLC plugin cache
+
+    Two more per-build non-deterministic caches from the frozen build-twice, both
+    confirmed (via investigation) to have NO in-chroot deterministic-regeneration
+    path, so deletion is the root-appropriate fix (matches the script's existing
+    "delete the non-deterministic cache" pattern):
+
+      - /var/cache/debconf/config.dat (+ passwords.dat) -- debconf answers DB, differs
+        by install order / stored temp values; only read at dpkg time, never at boot;
+        real config lives in each package's /etc. templates.dat is kept (deterministic;
+        deleting it breaks dpkg-reconfigure). passwords.dat deleted also on security
+        grounds (may hold secrets, mode 600).
+      - /usr/lib/<multiarch>/vlc/plugins/plugins.dat -- VLC plugin cache written in raw
+        readdir order (vlc-cache-gen does not sort, ignores SOURCE_DATE_EPOCH). VLC
+        scans plugins at startup when absent; Debian's dpkg trigger rebuilds it (#755154).
+
+    Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+    * 80_cleanup: pass -- to every safe-rm so a dash-leading path cannot be read as an option
+
+    Each safe-rm call now uses the -- end-of-options separator before its path
+    operands (R-062). A glob or variable that expanded to a value starting with '-'
+    (e.g. a stray '-rf' file) would otherwise be parsed as an option instead of a
+    path; -- forecloses that. Verified safe-rm honors -- (and '--force --' / '-r --').
+    No behavior change for the existing absolute paths; this is defense in depth and
+    makes the whole file consistent with the separator convention.
+
+    Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+    ---------
+
+    Co-authored-by: claude (dev74 3cdbae8e-30ec-412d-8ce2-ba63d1c9b6af) <noreply@anthropic.com>
+
+commit a5207f28f5875d337e42e71ceb208c4ceefd0ccb
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Wed May 20 22:06:06 2026 +0000
+
+    bumped changelog version
+
 commit 890161b71a335aaec4d1cd02f0ce9c907a606766
 Author: Patrick Schleizer <adrelanos@whonix.org>
 Date:   Wed May 20 16:56:53 2026 -0400
