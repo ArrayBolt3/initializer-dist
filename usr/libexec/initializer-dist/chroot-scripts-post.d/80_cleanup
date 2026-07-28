@@ -57,19 +57,37 @@ safe-rm -r -- /var/log/installer || true
 safe-rm -- /var/lib/dpkg/*-old || true
 safe-rm -- /var/cache/debconf/*-old || true
 
+## Delete the debconf ANSWERS databases. NOT for non-determinism: measured over two
+## independent CI builds and two sandbox builds, config.dat, passwords.dat and
+## templates.dat are byte-identical (config.dat carries no temp path, PID or timestamp,
+## and the multi-valued Owners lists do not vary). Kept because a shipped image has no use
+## for the answers database -- debconf reads it only during dpkg install/reconfigure, never
+## at boot, and the effective config already lives in each package's /etc files -- and
+## because passwords.dat (mode 600) is the file debconf would store a seeded password in.
+## Do NOT delete templates.dat: it holds the question templates; removing it breaks
+## dpkg-reconfigure (2014 regression: `dpkg-reconfigure console-data` -> keymap "NONE").
+safe-rm --force -- /var/cache/debconf/config.dat || true
+safe-rm --force -- /var/cache/debconf/passwords.dat || true
+
 ## non-deterministic
-## /var/cache/debconf/config.dat differs build-to-build (install-order-dependent
-## Owners/Flags, or a package storing a temp path/PID). Delete the debconf ANSWERS
-## databases only. Safe on a shipped image: debconf is read only during dpkg
-## install/reconfigure, never at boot; the real config lives in each package's /etc
-## files (already written by postinst). passwords.dat may also hold secrets (mode
-## 600) -- delete on security grounds too. Do NOT delete templates.dat: it holds the
-## question templates; removing it breaks dpkg-reconfigure (2014 regression:
-## `dpkg-reconfigure console-data` -> keymap "NONE") and it is deterministic anyway.
-## TEMPORARY (reproducibility investigation): keep both files in the image so an
-## A/B build can be compared. Restore before merging.
-#safe-rm --force -- /var/cache/debconf/config.dat || true
-#safe-rm --force -- /var/cache/debconf/passwords.dat || true
+## /var/cache/ldconfig/aux-cache -- ldconfig's binary auxiliary cache. Same size but
+## differing bytes between two independent builds (it records per-file identity, not just
+## paths). Safe to delete: ldconfig recreates it on the next run, and any package install
+## triggers one.
+safe-rm --force -- /var/cache/ldconfig/aux-cache || true
+
+## non-deterministic
+## /etc/locale.conf (target of the /etc/default/locale symlink) -- update-locale writes its
+## assignment lines in a non-deterministic order, so two builds differ by line order alone.
+## Sort it: the header comment sorts before the KEY=value lines, and the relative order of
+## those lines is irrelevant to every consumer.
+if [ -f /etc/locale.conf ]; then
+   locale_conf_sorted="$(mktemp)"
+   LC_ALL=C sort -- /etc/locale.conf > "${locale_conf_sorted}"
+   cat -- "${locale_conf_sorted}" > /etc/locale.conf
+   safe-rm --force -- "${locale_conf_sorted}"
+   unset locale_conf_sorted
+fi
 
 ## non-deterministic
 ## /usr/lib/<multiarch>/vlc/plugins/plugins.dat -- VLC's plugin cache, written by
