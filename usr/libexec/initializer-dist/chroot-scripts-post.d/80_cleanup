@@ -66,8 +66,10 @@ safe-rm -- /var/cache/debconf/*-old || true
 ## 600) -- delete on security grounds too. Do NOT delete templates.dat: it holds the
 ## question templates; removing it breaks dpkg-reconfigure (2014 regression:
 ## `dpkg-reconfigure console-data` -> keymap "NONE") and it is deterministic anyway.
-safe-rm --force -- /var/cache/debconf/config.dat || true
-safe-rm --force -- /var/cache/debconf/passwords.dat || true
+## TEMPORARY (reproducibility investigation): keep both files in the image so an
+## A/B build can be compared. Restore before merging.
+#safe-rm --force -- /var/cache/debconf/config.dat || true
+#safe-rm --force -- /var/cache/debconf/passwords.dat || true
 
 ## non-deterministic
 ## /usr/lib/<multiarch>/vlc/plugins/plugins.dat -- VLC's plugin cache, written by
