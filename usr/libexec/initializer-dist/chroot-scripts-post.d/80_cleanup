@@ -138,10 +138,19 @@ safe-rm --force -- /var/cache/ldconfig/aux-cache || true
 if [ -f /etc/locale.conf ]; then
    locale_conf_sorted="$(mktemp -- /etc/locale.conf.XXXXXXXX)"
    chmod --reference=/etc/locale.conf -- "${locale_conf_sorted}"
-   chown --reference=/etc/locale.conf -- "${locale_conf_sorted}"
+   ## Numeric owner via stat, NOT a --reference to the file itself. lintian's
+   ## script/deprecated ownership check greps for the old dotted user/group form and matches
+   ## a dot in the referenced FILENAME, so a --reference to this file raises a false positive
+   ## -- no such spec is present -- but genmkfile fails closed on any lintian tag, so it
+   ## broke the build. Passing uid:gid gives lintian no dot to misread, and is exact rather
+   ## than suppressed. Do not restore the --reference form here, and do not name the
+   ## offending command in a comment either: lintian greps the whole FILE, so even an
+   ## explanation of the problem can re-trigger it.
+   locale_conf_owner="$(stat --format='%u:%g' -- /etc/locale.conf)"
+   chown -- "${locale_conf_owner}" "${locale_conf_sorted}"
    LC_ALL=C sort -- /etc/locale.conf > "${locale_conf_sorted}"
    mv -- "${locale_conf_sorted}" /etc/locale.conf
-   unset locale_conf_sorted
+   unset locale_conf_sorted locale_conf_owner
 fi
 
 ## non-deterministic
