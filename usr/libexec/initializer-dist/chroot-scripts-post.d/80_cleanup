@@ -148,7 +148,12 @@ if [ -f /etc/locale.conf ]; then
    ## explanation of the problem can re-trigger it.
    locale_conf_owner="$(stat --format='%u:%g' -- /etc/locale.conf)"
    chown -- "${locale_conf_owner}" "${locale_conf_sorted}"
-   LC_ALL=C sort -- /etc/locale.conf > "${locale_conf_sorted}"
+   ## 'tee', not a plain '>' redirection: a redirection failure (full filesystem, unwritable
+   ## target) is easy to lose, whereas tee reports it as a command exit status that the
+   ## script's 'pipefail' turns into a hard failure. Writing a truncated locale
+   ## configuration and continuing is exactly the outcome the atomic replacement below
+   ## exists to prevent, so the write must fail loudly rather than half-succeed.
+   LC_ALL=C sort -- /etc/locale.conf | tee -- "${locale_conf_sorted}" >/dev/null
    mv -- "${locale_conf_sorted}" /etc/locale.conf
    unset locale_conf_sorted locale_conf_owner
 fi
