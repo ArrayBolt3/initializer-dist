@@ -91,12 +91,28 @@ fi
 ## answers rather than discarding the whole database. Matched by name so the BIOS variant
 ## (grub-pc) and the -disks_changed / _empty companions are covered too.
 ##
-## Word-splitting the name list is intentional.
-# shellcheck disable=SC2013
-for debconf_question_item in $(grep -- '^Name: .*install_devices' /var/cache/debconf/config.dat | cut -d ' ' -f 2 || true); do
-   printf 'RESET %s\n' "${debconf_question_item}" | debconf-communicate >/dev/null || true
-done
-unset debconf_question_item
+## One pipeline rather than a name loop: debconf-communicate reads its commands from stdin,
+## so the matched question names go straight in. The pattern covers the BIOS variant
+## (grub-pc) and the _empty / _disks_changed companions, which record device paths too.
+grep --only-matching --extended-regexp -- 'grub-[^/[:space:]]+/install_devices[a-z_]*' \
+   /var/cache/debconf/config.dat \
+   | LC_ALL=C sort --unique \
+   | sed 's/^/RESET /' \
+   | debconf-communicate >/dev/null || true
+
+## Prove it worked. The answers database SHIPS, so a build-host block device left in it is a
+## defect, not a warning: it leaks the build environment into the image, and because loop
+## numbering is allocation-dependent it also breaks reproducibility on a host where loop0 was
+## already taken. Measured on a real image, config.dat contains exactly ONE /dev/ reference --
+## the grub answer reset above -- so this fires only on a genuine leftover. Block devices are
+## matched specifically, so a legitimate /dev/null answer never trips it.
+debconf_device_leak_pattern='/dev/(loop|mapper/loop|sd[a-z]|nvme[0-9]|vd[a-z]|xvd[a-z])'
+if grep --quiet --extended-regexp -- "${debconf_device_leak_pattern}" /var/cache/debconf/config.dat; then
+   printf '%s\n' "ERROR: ${own_filename}: build-host device references remain in /var/cache/debconf/config.dat:" >&2
+   grep --before-context=2 --extended-regexp -- "${debconf_device_leak_pattern}" /var/cache/debconf/config.dat >&2
+   exit 1
+fi
+unset debconf_device_leak_pattern
 
 ## Do NOT delete templates.dat: it holds the question templates; removing it breaks
 ## dpkg-reconfigure (2014 regression: `dpkg-reconfigure console-data` -> keymap "NONE").
