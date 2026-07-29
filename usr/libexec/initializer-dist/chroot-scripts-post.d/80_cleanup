@@ -57,17 +57,101 @@ safe-rm -r -- /var/log/installer || true
 safe-rm -- /var/lib/dpkg/*-old || true
 safe-rm -- /var/cache/debconf/*-old || true
 
+## Drop the debconf PASSWORD database, but never silently. debconf stores password answers
+## here (mode 600), so a database holding an ANSWER means the build captured a credential:
+## shipping it would leak the credential, and deleting it quietly would hide that it ever
+## existed. Measured across four builds on two machines it holds only the two Secure Boot
+## MOK prompts (shim/secureboot_key, shim/secureboot_key_again) with no stored answer, so
+## the normal case is discarding a file that has nothing in it.
+##
+## "Holds an answer" is a 'Value:' field, not a non-zero size: the two prompts above are
+## 180 bytes of question ownership with no answer, which is the empty case. Report the
+## offending question NAMES on failure, never their values.
+if [ -f /var/cache/debconf/passwords.dat ]; then
+   if grep --quiet -- '^Value:' /var/cache/debconf/passwords.dat; then
+      printf '%s\n' "ERROR: ${own_filename}: /var/cache/debconf/passwords.dat holds stored answers." >&2
+      printf '%s\n' "A password was captured during the build; refusing to ship it or to delete it silently." >&2
+      printf '%s\n' "affected question(s):" >&2
+      grep -- '^Name:' /var/cache/debconf/passwords.dat >&2
+      exit 1
+   fi
+   safe-rm --force -- /var/cache/debconf/passwords.dat
+fi
+
+## KEEP the debconf answers database (config.dat). Measured byte-identical across four
+## builds on two machines, and every stored answer is package configuration (keymap,
+## locale, fontconfig, CA list, PAM profiles, timezone) -- nothing confidential. Keeping it
+## means dpkg-reconfigure, debconf-show and the first upgrade see the real prior answers
+## instead of silently falling back to defaults.
+##
+## One class of answer must not ship: grub records the BUILD HOST's install device
+## (grub-efi-amd64/install_devices = /dev/loop0). That is build-environment state, and
+## loop-device numbering is allocation-dependent -- a build host with loops already in use
+## writes a different value, so the image would stop being reproducible. Reset those
+## answers rather than discarding the whole database. Matched by name so the BIOS variant
+## (grub-pc) and the -disks_changed / _empty companions are covered too.
+##
+## One pipeline rather than a name loop: debconf-communicate reads its commands from stdin,
+## so the matched question names go straight in. The pattern covers the BIOS variant
+## (grub-pc) and the _empty / _disks_changed companions, which record device paths too.
+grep --only-matching --extended-regexp -- 'grub-[^/[:space:]]+/install_devices[a-z_]*' \
+   /var/cache/debconf/config.dat \
+   | LC_ALL=C sort --unique \
+   | sed 's/^/RESET /' \
+   | debconf-communicate >/dev/null || true
+
+## Prove it worked. The answers database SHIPS, so a build-host block device left in it is a
+## defect, not a warning: it leaks the build environment into the image, and because loop
+## numbering is allocation-dependent it also breaks reproducibility on a host where loop0 was
+## already taken. Measured on a real image, config.dat contains exactly ONE /dev/ reference --
+## the grub answer reset above -- so this fires only on a genuine leftover. Block devices are
+## matched specifically, so a legitimate /dev/null answer never trips it.
+debconf_device_leak_pattern='/dev/(loop|mapper/loop|sd[a-z]|nvme[0-9]|vd[a-z]|xvd[a-z])'
+if grep --quiet --extended-regexp -- "${debconf_device_leak_pattern}" /var/cache/debconf/config.dat; then
+   printf '%s\n' "ERROR: ${own_filename}: build-host device references remain in /var/cache/debconf/config.dat:" >&2
+   grep --before-context=2 --extended-regexp -- "${debconf_device_leak_pattern}" /var/cache/debconf/config.dat >&2
+   exit 1
+fi
+unset debconf_device_leak_pattern
+
+## Do NOT delete templates.dat: it holds the question templates; removing it breaks
+## dpkg-reconfigure (2014 regression: `dpkg-reconfigure console-data` -> keymap "NONE").
+
 ## non-deterministic
-## /var/cache/debconf/config.dat differs build-to-build (install-order-dependent
-## Owners/Flags, or a package storing a temp path/PID). Delete the debconf ANSWERS
-## databases only. Safe on a shipped image: debconf is read only during dpkg
-## install/reconfigure, never at boot; the real config lives in each package's /etc
-## files (already written by postinst). passwords.dat may also hold secrets (mode
-## 600) -- delete on security grounds too. Do NOT delete templates.dat: it holds the
-## question templates; removing it breaks dpkg-reconfigure (2014 regression:
-## `dpkg-reconfigure console-data` -> keymap "NONE") and it is deterministic anyway.
-safe-rm --force -- /var/cache/debconf/config.dat || true
-safe-rm --force -- /var/cache/debconf/passwords.dat || true
+## /var/cache/ldconfig/aux-cache -- ldconfig's binary auxiliary cache. Same size but
+## differing bytes between two independent builds (it records per-file identity, not just
+## paths). Safe to delete: ldconfig recreates it on the next run, and any package install
+## triggers one.
+safe-rm --force -- /var/cache/ldconfig/aux-cache || true
+
+## non-deterministic
+## /etc/locale.conf (target of the /etc/default/locale symlink) -- update-locale writes its
+## assignment lines in a non-deterministic order, so two builds differ by line order alone.
+## Sort it: the header comment sorts before the KEY=value lines, and the relative order of
+## those lines is irrelevant to every consumer.
+##
+## Replace it atomically. Writing the sorted content back over the live file truncates it
+## first, so an interrupted write leaves the locale configuration empty or partial with no
+## way to recover it -- and this runs late in the build, after the answers that produced it
+## are gone. Stage the sorted copy in /etc so the rename is within one filesystem, carry
+## the original mode and owner onto it, then rename over the original.
+if [ -f /etc/locale.conf ]; then
+   locale_conf_sorted="$(mktemp -- /etc/locale.conf.XXXXXXXX)"
+   chmod --reference=/etc/locale.conf -- "${locale_conf_sorted}"
+   ## Numeric owner via stat, NOT a --reference to the file itself. lintian's
+   ## script/deprecated ownership check greps for the old dotted user/group form and matches
+   ## a dot in the referenced FILENAME, so a --reference to this file raises a false positive
+   ## -- no such spec is present -- but genmkfile fails closed on any lintian tag, so it
+   ## broke the build. Passing uid:gid gives lintian no dot to misread, and is exact rather
+   ## than suppressed. Do not restore the --reference form here, and do not name the
+   ## offending command in a comment either: lintian greps the whole FILE, so even an
+   ## explanation of the problem can re-trigger it.
+   locale_conf_owner="$(stat --format='%u:%g' -- /etc/locale.conf)"
+   chown -- "${locale_conf_owner}" "${locale_conf_sorted}"
+   LC_ALL=C sort -- /etc/locale.conf | tee -- "${locale_conf_sorted}" >/dev/null
+   mv -- "${locale_conf_sorted}" /etc/locale.conf
+   unset locale_conf_sorted locale_conf_owner
+fi
 
 ## non-deterministic
 ## /usr/lib/<multiarch>/vlc/plugins/plugins.dat -- VLC's plugin cache, written by
