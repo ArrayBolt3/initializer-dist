@@ -113,11 +113,18 @@ safe-rm --force -- /var/cache/ldconfig/aux-cache || true
 ## assignment lines in a non-deterministic order, so two builds differ by line order alone.
 ## Sort it: the header comment sorts before the KEY=value lines, and the relative order of
 ## those lines is irrelevant to every consumer.
+##
+## Replace it atomically. Writing the sorted content back over the live file truncates it
+## first, so an interrupted write leaves the locale configuration empty or partial with no
+## way to recover it -- and this runs late in the build, after the answers that produced it
+## are gone. Stage the sorted copy in /etc so the rename is within one filesystem, carry
+## the original mode and owner onto it, then rename over the original.
 if [ -f /etc/locale.conf ]; then
-   locale_conf_sorted="$(mktemp)"
+   locale_conf_sorted="$(mktemp -- /etc/locale.conf.XXXXXXXX)"
+   chmod --reference=/etc/locale.conf -- "${locale_conf_sorted}"
+   chown --reference=/etc/locale.conf -- "${locale_conf_sorted}"
    LC_ALL=C sort -- /etc/locale.conf > "${locale_conf_sorted}"
-   cat -- "${locale_conf_sorted}" > /etc/locale.conf
-   safe-rm --force -- "${locale_conf_sorted}"
+   mv -- "${locale_conf_sorted}" /etc/locale.conf
    unset locale_conf_sorted
 fi
 
