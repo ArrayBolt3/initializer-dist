@@ -1,3 +1,221 @@
+commit fa70a290ae585372ab4750fa090e1375ca3150f0
+Merge: 62153f5 e72af5e
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Wed Jul 29 08:09:50 2026 -0400
+
+    Merge remote-tracking branch 'refs/remotes/org-ai-assisted/master'
+
+commit e72af5ee25c7ce84d97bbea22336ee6d322c8385
+Merge: 62153f5 4fd9527
+Author: assisted-by-ai (Bot Account) (Machine Account) <228987186+assisted-by-ai@users.noreply.github.com>
+Date:   Wed Jul 29 07:41:08 2026 -0400
+
+    80_cleanup: keep config.dat, reset its build artifact, fail loud on a stored password (#3)
+
+    Measured across four builds on two machines: config.dat, passwords.dat and templates.dat are byte-identical, so the deletion rationale (install-order-dependent Owners/Flags, or a package storing a temp path/PID) was wrong.
+
+    config.dat is now KEPT -- every stored answer is package configuration, nothing confidential -- with the one build-host answer (grub install_devices = /dev/loop0) reset, and a check that errors out if a build-host block device survives.
+
+    passwords.dat is still dropped, but errors out if it ever holds a stored answer rather than silently deleting a captured credential.
+
+    Also strips the ldconfig aux-cache and sorts locale.conf (both measured non-deterministic), replacing it atomically via tee.
+
+commit 4fd9527b605f74bd5062ed2f1ae1e53e66f1da3e
+Author: claude (dev116 2f00841a-e951-46b4-ad01-1c1da14e19ce) <noreply@anthropic.com>
+Date:   Wed Jul 29 07:04:42 2026 -0400
+
+    80_cleanup: drop the tee comment
+
+    The pipeline speaks for itself.
+
+    Generated with assistance from Claude Code.
+
+commit 408301022b6e7a458a1bf6cb25602aea430c7f48
+Author: claude (dev116 2f00841a-e951-46b4-ad01-1c1da14e19ce) <noreply@anthropic.com>
+Date:   Wed Jul 29 07:00:17 2026 -0400
+
+    80_cleanup: write the sorted locale.conf through tee
+
+    A plain redirection reports a failed write in a way that is easy to lose; tee reports it as
+    a command exit status inside a pipeline, which this script pipefail turns into a hard
+    failure. Writing a truncated locale configuration and carrying on is exactly what the
+    atomic replacement here exists to prevent, so the write should fail loudly rather than
+    half-succeed.
+
+    Validated with a SYNTHETIC test in the sandbox rather than a full image build
+    (~/private-cache/repro-evidence/locale-tee-test.sh): sorts deterministically, the atomic
+    replace preserves mode 644 and owner, and a failing write is caught (exit 1).
+
+    Honest limit of that test: a plain > redirection ALSO fails on the same target, so this is
+    not a case of one silently succeeding. The gain is where the failure surfaces -- a pipeline
+    command status pipefail acts on, rather than a redirection error whose handling depends on
+    context.
+
+    Generated with assistance from Claude Code.
+
+commit bc2d19be36c7746e295142ff845e03fb0b1c90ca
+Author: claude (dev116 2f00841a-e951-46b4-ad01-1c1da14e19ce) <noreply@anthropic.com>
+Date:   Wed Jul 29 01:51:53 2026 -0400
+
+    80_cleanup: pass a numeric owner, avoiding a lintian false positive
+
+    The atomic locale.conf replacement broke the build. genmkfile fails closed on any lintian
+    tag, and lintian raised:
+
+      P: initializer-dist: chown-with-dot --reference=/etc/locale.conf [80_cleanup:141]
+
+    A false positive: script/deprecated ownership checking greps for the old dotted user/group
+    form and matched the dot in the FILENAME. No such spec was ever on that line.
+
+    Pass an explicit uid:gid from stat instead. That gives lintian no dot to misread, and is
+    exact rather than suppressed with an override.
+
+    The comment explaining this deliberately does not name the offending command: lintian greps
+    the whole FILE, so a first attempt at this comment quoted the command verbatim and would
+    have re-triggered the very tag it documents.
+
+    Found by CI run 30424533782, which failed both builds at package build. Worth noting what
+    this run did NOT reach: the leak sanity check runs during image creation, so it remains
+    unverified in situ.
+
+    Generated with assistance from Claude Code.
+
+commit 5abbd754bbf67b3a78f8ef20fe034ae4adaf6af0
+Author: claude (dev116 2f00841a-e951-46b4-ad01-1c1da14e19ce) <noreply@anthropic.com>
+Date:   Wed Jul 29 01:01:15 2026 -0400
+
+    80_cleanup: simplify the grub reset match, and prove it worked
+
+    The name loop became one pipeline: debconf-communicate reads its commands from stdin, so
+    the matched question names go straight in -- no loop, no word-splitting waiver. The pattern
+    is anchored on grub-*/install_devices so it reads as what it targets, and still covers the
+    BIOS variant (grub-pc) and the _empty / _disks_changed companions, which record device
+    paths too. On a real image it selects exactly grub-efi-amd64/install_devices.
+
+    Added a sanity check that ERRORS OUT if a build-host block device survives in config.dat.
+    That database now SHIPS, so a leftover is a defect rather than a warning: it leaks the
+    build environment into the image, and because loop numbering is allocation-dependent it
+    also breaks reproducibility on a host where loop0 was already taken.
+
+    Verified against the real extracted image database, all five properties:
+
+    - the check FIRES before the reset (Value: /dev/loop0) -- a sanity check that cannot fire
+      is worse than none, because it reads as proof
+    - the simplified pattern selects grub-efi-amd64/install_devices
+    - the check is SILENT after the reset
+    - a legitimate /dev/null answer does not trip it (block devices are matched specifically)
+    - all 266 stanzas survive
+
+    Measured beforehand: the real config.dat holds exactly ONE /dev/ reference, the grub answer
+    itself, so this fires only on a genuine leftover.
+
+    Generated with assistance from Claude Code.
+
+commit be657fbedb42a661591077e7537cd279c0d52990
+Author: claude (dev116 2f00841a-e951-46b4-ad01-1c1da14e19ce) <noreply@anthropic.com>
+Date:   Wed Jul 29 00:30:53 2026 -0400
+
+    80_cleanup: replace locale.conf atomically (review)
+
+    Sorting wrote the result back over the live file, which truncates it first: an
+    interrupted or failing write leaves the locale configuration empty or partial, and this
+    runs late in the build, after the answers that produced it are gone, so a rerun cannot
+    recover it.
+
+    Stage the sorted copy in /etc so the rename stays within one filesystem, carry the
+    original mode and owner onto it, then rename over the original. Path-based rename keeps
+    the /etc/default/locale symlink resolving.
+
+    Reported by CodeRabbit on org-ai-assisted/initializer-dist#3.
+
+    Generated with assistance from Claude Code.
+
+commit e292bbfd7585aa130cd507c65d2a5875b840abd1
+Author: claude (dev116 2f00841a-e951-46b4-ad01-1c1da14e19ce) <noreply@anthropic.com>
+Date:   Wed Jul 29 00:23:39 2026 -0400
+
+    80_cleanup: keep config.dat, reset its build artifact; fail loud on a stored password
+
+    Replaces the blanket deletion of both debconf answer databases, whose stated reason
+    (install-order-dependent Owners/Flags, or a package storing a temp path/PID) measurement
+    disproved: config.dat, passwords.dat and templates.dat came out byte-identical from four
+    builds on two machines.
+
+    passwords.dat -- delete, but never silently. A database holding an ANSWER means the build
+    captured a credential; shipping it would leak it and deleting it quietly would hide that
+    it existed. Error out instead, naming the questions and never their values. "Holds an
+    answer" is a Value: field, not a non-zero size: the two Secure Boot MOK prompts
+    (shim/secureboot_key, shim/secureboot_key_again) are 180 bytes of question ownership with
+    no answer, which is the empty case seen in every build measured.
+
+    config.dat -- keep. Every stored answer is package configuration (keymap, locale,
+    fontconfig, CA list, PAM profiles, timezone); nothing confidential, verified by reading
+    all 50 value-bearing stanzas. Keeping it means dpkg-reconfigure, debconf-show and the
+    first upgrade see real prior answers instead of silently falling back to defaults.
+
+    One answer must not ship: grub records the BUILD HOST install device
+    (grub-efi-amd64/install_devices = /dev/loop0). Loop-device numbering is
+    allocation-dependent, so a build host with loops already in use would write a different
+    value and the image would stop being reproducible -- latent today, since all four
+    measured builds happened to get loop0. Reset those answers instead of discarding the
+    whole database; matched by name so the grub-pc variant and the _empty /
+    _disks_changed companions are covered.
+
+    Verified against the two extracted CI databases: RESET turns "Value: /dev/loop0" into an
+    empty value, leaves zero /dev/loop occurrences, preserves all 266 stanzas, and the two
+    independent builds stay byte-identical afterwards (0b1eb3ec...).
+
+    Generated with assistance from Claude Code.
+
+commit 8abc3ce4bc5a5d9f78fa7d6bc7b50c39c7a2f933
+Author: claude (dev116 2f00841a-e951-46b4-ad01-1c1da14e19ce) <noreply@anthropic.com>
+Date:   Tue Jul 28 16:57:39 2026 -0400
+
+    80_cleanup: strip ldconfig aux-cache, sort locale.conf, correct the debconf rationale
+
+    Measured across two independent CI builds of the same source (run 30383133187) plus two
+    sandbox builds. Only four files differ in CONTENT between the two images; two of them are
+    fixed here.
+
+    - /var/cache/ldconfig/aux-cache: same size, differing bytes (it records per-file identity,
+      not just paths). Delete it; ldconfig recreates it on the next run and any package install
+      triggers one.
+    - /etc/locale.conf: update-locale writes its assignment lines in a non-deterministic order,
+      so the two builds differed by line order alone (LANG/LANGUAGE swapped). Sort it. This was
+      previously handled by build-steps.d/4350_reimage-raw-reproducible, which is now a 0-byte
+      no-op, so the normalization was lost.
+    - debconf: the deletion stays, but its stated reason was wrong. config.dat, passwords.dat
+      and templates.dat came out BYTE-IDENTICAL from all four builds on two different machines;
+      config.dat carries no temp path, PID or timestamp, and the multi-valued Owners lists do
+      not vary. Rewrite the comment to say why the files are actually dropped (a shipped image
+      has no use for the answers database, and passwords.dat is where a seeded password would
+      land) instead of claiming a non-determinism that does not exist.
+
+    Generated with assistance from Claude Code.
+
+commit f69031370d343813295449c11a1bdcc2bbdd7171
+Author: claude (dev116 2f00841a-e951-46b4-ad01-1c1da14e19ce) <noreply@anthropic.com>
+Date:   Tue Jul 28 11:59:50 2026 -0400
+
+    TEMPORARY: keep the debconf databases in the image
+
+    Experiment branch, not for merge. Disables the config.dat / passwords.dat deletion
+    in 80_cleanup so an A/B build can compare the two copies and establish whether they
+    are actually non-reproducible, rather than assuming it.
+
+    The deletion's own comment asserts install-order-dependent Owners/Flags without
+    evidence in the tree; this is how that claim gets tested.
+
+    templates.dat and the *-old strip are untouched.
+
+    Generated with assistance from Claude Code.
+
+commit 62153f550e64e72359aeec5d6f4ce3a145d2cd92
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Tue Jul 21 10:36:27 2026 +0000
+
+    bumped changelog version
+
 commit 7fd51fe02b86553ac22d2515ef958c5d613cf11d
 Merge: a5207f2 d7e8d7f
 Author: Patrick Schleizer <adrelanos@whonix.org>
