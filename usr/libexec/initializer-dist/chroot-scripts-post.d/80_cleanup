@@ -32,11 +32,11 @@ clean_dhcp() {
    ## Kill dhclient3 to prevent rewrite of /var/lib/dhcp/*.
    killall dhclient3 || true
    ## There are .leases.
-   safe-rm -- /var/lib/dhcp/*.leases || true
+   safe-rm --force -- /var/lib/dhcp/*.leases || true
    ## And there are .lease.
-   safe-rm -- /var/lib/dhcp/*.lease || true
+   safe-rm --force -- /var/lib/dhcp/*.lease || true
    ## We are best off deleting the whole folder.
-   safe-rm -r -- /var/lib/dhcp/* || true
+   safe-rm -r --force -- /var/lib/dhcp/* || true
 }
 
 clean_apt() {
@@ -56,9 +56,9 @@ clean_apt() {
    ## Leftover from build process using mmdebstrap.
    safe-rm --force -- /etc/apt/apt.conf.d/99mmdebstrap
 
-   safe-rm -r -- /var/cache/apt/* || true
-   safe-rm -r -- /var/lib/apt/lists/* || true
-   safe-rm -- /var/lib/dpkg/*-old || true
+   safe-rm -r --force -- /var/cache/apt/* || true
+   safe-rm -r --force -- /var/lib/apt/lists/* || true
+   safe-rm --force -- /var/lib/dpkg/*-old || true
 }
 
 ## Print the 'Name:' line of every debconf record that carries a 'Value:' line.
@@ -165,27 +165,27 @@ clean_nondeterministic() {
    safe-rm --force -- /usr/lib/*/vlc/plugins/plugins.dat || true
 
    ## Erase rotated logs.
-   safe-rm -- /var/log/*.[0-9] || true
-   safe-rm -- /var/log/*.[0-9].gz || true
+   safe-rm --force -- /var/log/*.[0-9] || true
+   safe-rm --force -- /var/log/*.[0-9].gz || true
 
    ## Delete logs and other stuff.
    ## style-ok: no-tmp-hardcode -- purging the chroot's own /tmp before shipping.
-   safe-rm -r -- /tmp/* || true
-   safe-rm -r -- /var/log/installer || true
-   safe-rm -- /var/cache/debconf/*-old || true
+   safe-rm -r --force -- /tmp/* || true
+   safe-rm -r --force -- /var/log/installer || true
+   safe-rm --force -- /var/cache/debconf/*-old || true
 
    ## Truncate all log files, keeping user groups and permissions.
    find /var/log -type f -exec cp /dev/null {} \;
 
    ## Delete bash history.
    [[ -v user_name ]] || user_name="user"
-   safe-rm -- "/home/${user_name}/.bash_history" || true
-   safe-rm -- "/root/.bash_history" || true
+   safe-rm --force -- "/home/${user_name}/.bash_history" || true
+   safe-rm --force -- "/root/.bash_history" || true
    history -c || true
 
    ## Delete X auth cookies.
-   safe-rm -- "/home/${user_name}/.Xauthority" || true
-   safe-rm -- "/root/.Xauthority" || true
+   safe-rm --force -- "/home/${user_name}/.Xauthority" || true
+   safe-rm --force -- "/root/.Xauthority" || true
 
    ## /etc/init.d/.depend.boot
    ## /etc/init.d/.depend.start
@@ -207,7 +207,7 @@ clean_nondeterministic() {
    ## No need to manually re-create it.
    ## Gets automatically re-created on next run of tb-updater.
    ## This is no longer required for Debian Jessie?
-   safe-rm -r -- /var/cache/tb-binary/.cache/tb/gpgtmpdir || true
+   safe-rm -r --force -- /var/cache/tb-binary/.cache/tb/gpgtmpdir || true
 }
 
 clean_time_and_apt_sources() {
@@ -260,7 +260,7 @@ clean_seeds_and_ids() {
    ## /run/blkid/blkid.tab.old
    ## /run is runtime tmpfs state and must be empty in a shipped image, but a build-time blkid
    ## run leaked the disk-uuid cache into the rootfs. Strip it.
-   safe-rm -r -- /run/blkid/* || true
+   safe-rm -r --force -- /run/blkid/* || true
 }
 
 main() {
